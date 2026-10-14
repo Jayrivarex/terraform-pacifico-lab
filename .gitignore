@@ -1,0 +1,11 @@
+# Terraform local files, states and lock files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+.terraform.lock.hcl
+
+# Sensitive variables (Never commit passwords or secrets)
+terraform.tfvars
+*.tfvars
