@@ -1,4 +1,4 @@
-name: Banco Pacifico - CI/CD & DevSecOps Pipeline
+name: Banco Pacifico - Terraform CI/CD & DevSecOps
 
 on:
   push:
@@ -7,24 +7,25 @@ on:
     branches: [ "main" ]
 
 jobs:
-  security-and-quality:
-    name: DevSecOps SAST & SCA Scans
+  iac-security-scan:
+    name: IaC Security & Compliance Scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup .NET Core
-        uses: actions/setup-dotnet@v4
+      - name: Run Trivy Scanner for IaC Misconfigurations
+        uses: aquasecurity/trivy-action@master
         with:
-          dotnet-version: '8.0.x'
-
-      - name: Dependency Vulnerability Scan (SCA simulation)
-        run: dotnet list package --vulnerable
+          scan-type: 'config'
+          hide-progress: false
+          format: 'table'
+          exit-code: '0' # Cambiar a '1' en producción estricta si deseas bloquear por vulnerabilidades medias/altas
+          ignore-unfixed: true
 
   terraform-validate:
-    name: IaC Governance & Plan
-    needs: security-and-quality
+    name: Terraform Governance & Plan
+    needs: iac-security-scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -40,21 +41,3 @@ jobs:
 
       - name: Terraform Validate
         run: terraform validate
-
-  deploy-to-staging:
-    name: Zero-Downtime Deploy to Staging Slot (Green)
-    needs: terraform-validate
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Deploy to App Service Staging Slot
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: 'app-pacifico-api-xyz'
-          slot-name: 'staging'
-          package: '.'
