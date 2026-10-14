@@ -1,0 +1,60 @@
+name: Banco Pacifico - CI/CD & DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ "main", "release/*" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  security-and-quality:
+    name: DevSecOps SAST & SCA Scans
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Dependency Vulnerability Scan (SCA simulation)
+        run: dotnet list package --vulnerable
+
+  terraform-validate:
+    name: IaC Governance & Plan
+    needs: security-and-quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5.0'
+
+      - name: Terraform Init
+        run: terraform init -upgrade
+
+      - name: Terraform Validate
+        run: terraform validate
+
+  deploy-to-staging:
+    name: Zero-Downtime Deploy to Staging Slot (Green)
+    needs: terraform-validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to App Service Staging Slot
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'app-pacifico-api-xyz'
+          slot-name: 'staging'
+          package: '.'
