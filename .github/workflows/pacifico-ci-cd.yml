@@ -1,4 +1,4 @@
-name: Banco Pacifico - Terraform CI/CD & DevSecOps
+name: Banco Pacifico - Full DevSecOps & Cloud Pipeline
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   iac-security-scan:
-    name: IaC Security & Compliance Scan
+    name: IaC Security & Compliance Scan (Trivy)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -18,26 +18,64 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'config'
-          hide-progress: false
           format: 'table'
-          exit-code: '0' # Cambiar a '1' en producción estricta si deseas bloquear por vulnerabilidades medias/altas
-          ignore-unfixed: true
+          exit-code: '0'
 
-  terraform-validate:
-    name: Terraform Governance & Plan
+  terraform-apply:
+    name: Provision Infrastructure (Terraform)
     needs: iac-security-scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: '1.5.0'
 
-      - name: Terraform Init
-        run: terraform init -upgrade
+      - name: Terraform Init & Apply
+        run: |
+          terraform init -upgrade
+          terraform apply -auto-approve
 
-      - name: Terraform Validate
-        run: terraform validate
+  containerize-and-push:
+    name: Build Docker & Push to ACR
+    needs: terraform-apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and Push Image to ACR
+        run: |
+          az acr build --registry acrpacificodevopsxyz --image pacifico-api:${{ github.sha }} .
+
+  deploy-canary-and-swap:
+    name: Canary Routing & Blue-Green Swap
+    needs: containerize-and-push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set 10% Canary Traffic Routing on Staging Slot
+        run: |
+          az webapp traffic-routing set --resource-group 1-e11996eb-playground-sandbox --name app-pacifico-api-xyz --distribution staging=10 production=90
+
+      - name: Execute Zero-Downtime Deployment Slot Swap
+        run: |
+          az webapp deployment slot swap --resource-group 1-e11996eb-playground-sandbox --name app-pacifico-api-xyz --slot staging --target-slot production
